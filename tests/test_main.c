@@ -3,7 +3,7 @@
 #include "test_msg.h"
 
 int main(void) {
-    test_cobs_encode_decode();
+    test_cobs();
     test_crc16();
     test_msg();
 
