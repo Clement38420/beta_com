@@ -79,3 +79,39 @@ int cobs_decode(const uint8_t *input, size_t in_len, uint8_t *output, size_t *ou
 
     return 0;
 }
+
+int calculate_crc16(const uint8_t *data, size_t length, uint16_t *crc_out) {
+    if (data == NULL || crc_out == NULL) {
+        return 1;
+    }
+
+    uint16_t crc = 0xFFFF;
+
+    for (int i = 0; i<length; i++) {
+        crc ^= data[i];
+
+        for (int j = 0; j < 8; j++) {
+            if (crc & 0x0001) {
+                crc = (crc >> 1) ^ CRC16_REFLECTED_POLY;
+            } else {
+                crc >>= 1;
+            }
+        }
+    }
+    *crc_out = crc;
+
+    return 0;
+}
+
+int check_crc16(const uint8_t *data, size_t length, uint16_t expected_crc) {
+    if (data == NULL) {
+        return 1;
+    }
+
+    uint16_t calculated_crc;
+    if (calculate_crc16(data, length, &calculated_crc) != 0) {
+        return 1;
+    }
+
+    return (calculated_crc == expected_crc) ? 0 : 1;
+}

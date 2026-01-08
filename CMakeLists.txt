@@ -10,6 +10,7 @@ if(BUILD_TESTS)
     add_executable(unit_tests
             tests/test_main.c
             tests/test_cobs.c
+            tests/test_crc16.c
     )
     target_link_libraries(unit_tests beta_com)
 endif()
