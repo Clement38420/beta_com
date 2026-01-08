@@ -11,6 +11,7 @@ if(BUILD_TESTS)
             tests/test_main.c
             tests/test_cobs.c
             tests/test_crc16.c
+            tests/test_msg.c
     )
     target_link_libraries(unit_tests beta_com)
 endif()

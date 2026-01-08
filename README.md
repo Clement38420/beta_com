@@ -88,6 +88,44 @@ if (check_crc16(data, sizeof(data), expected_crc_val) == 0) {
 
 ```
 
+## Main API
+
+The main API provides a simplified interface for generating and decoding messages with CRC16 and COBS.
+
+### 1. Generate Encoded Message
+
+This function automates the process of calculating the CRC16, appending it to the data, and then COBS-encoding the result.
+
+```c
+uint8_t raw_data[] = {0x01, 0x02, 0x03};
+uint8_t encoded_message[256];
+size_t encoded_len = sizeof(encoded_message);
+
+// A work buffer is required to store the data + CRC before encoding.
+// It must be at least sizeof(raw_data) + 2 bytes.
+uint8_t work_buffer[sizeof(raw_data) + 2];
+
+if (generate_encoded_message(raw_data, sizeof(raw_data), encoded_message, &encoded_len, work_buffer, sizeof(work_buffer)) == 0) {
+    // encoded_message now contains the COBS-encoded frame with CRC
+    // Ready to be sent over UART
+}
+```
+
+### 2. Decode Message
+
+This function decodes a COBS frame and verifies its integrity using the CRC16 checksum.
+
+```c
+uint8_t received_frame[] = {0x04, 0x01, 0x02, 0x03, 0x41, 0x73, 0x00}; // Example frame
+uint8_t decoded_payload[256];
+size_t decoded_len = sizeof(decoded_payload);
+
+if (decode_message(received_frame, sizeof(received_frame), decoded_payload, &decoded_len) == 0) {
+    // decoded_payload contains the original data {0x01, 0x02, 0x03}
+    // CRC check was successful
+}
+```
+
 ## Points of Vigilance
 
 1. **Buffer Initialization**: The `out_len` pointer passed to `cobs_encode` and `cobs_decode` serves a dual purpose. **Input**: Max buffer size. **Output**: Actual written size. Failing to initialize it with the buffer size will lead to errors (return code `1`) or buffer overflows.
