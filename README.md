@@ -132,3 +132,17 @@ if (decode_message(received_frame, sizeof(received_frame), decoded_payload, &dec
 2. **COBS Overhead**: The output buffer for `cobs_encode` must be larger than the input. Worst case overhead is 1 byte per 254 bytes of data, plus 1 overhead byte, plus 1 byte for the trailing zero.
 3. **CRC Standard**: This library uses the **Modbus** standard (reflected polynomial `0xA001`). Ensure both the UART sender and receiver use this exact CRC configuration.
 4. **Zero Delimiter**: `cobs_encode` automatically appends a `0x00` byte at the end of the frame. `cobs_decode` expects a valid COBS sequence.
+
+## Error Codes
+
+All functions return a `beta_com_err_t` value. A return value of `BETA_COM_SUCCESS` (0) indicates success. Any other value indicates an error.
+
+| Code                          | Value | Description                                                              |
+|-------------------------------|-------|--------------------------------------------------------------------------|
+| `BETA_COM_SUCCESS`            | 0     | Operation successful.                                                    |
+| `BETA_COM_ERR_INVALID_ARGS`   | -1    | A `NULL` pointer was passed for a required parameter.                    |
+| `BETA_COM_ERR_BUFFER_TOO_SMALL` | -2    | The provided output or work buffer is not large enough for the result.   |
+| `BETA_COM_ERR_DATA_CORRUPTED`   | -3    | The input data for `cobs_decode` is not a valid COBS-encoded sequence.   |
+| `BETA_COM_ERR_CRC_MISMATCH`     | -4    | The CRC16 checksum of the decoded data does not match the expected value. |
+| `BETA_COM_ERR_MSG_TOO_SHORT`    | -5    | The decoded message is too short to contain a valid CRC16 checksum.      |
+
