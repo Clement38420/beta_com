@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 project(beta_com C)
 
-option(BUILD_TESTS "Construire les tests unitaires" OFF)
+option(BUILD_TESTS "Build unit tests" OFF)
 
 add_library(beta_com library.c)
 set_property(TARGET beta_com PROPERTY C_STANDARD 99)
