@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum {
     BETA_COM_SUCCESS = 0,               // Operation successful
     BETA_COM_ERR_INVALID_ARGS = -1,     // NULL pointers passed as parameters
@@ -82,5 +86,9 @@ beta_com_err_t generate_encoded_message(const uint8_t *input, size_t in_len, uin
  * @return BETA_COM_SUCCESS (0) on success, error code (non-zero) on failure
  */
 beta_com_err_t decode_message(const uint8_t *input, size_t in_len, uint8_t *output, size_t *out_len);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // BETACOM_LIBRARY_H
