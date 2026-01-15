@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "library.h"
+#include "beta_com.h"
 
 static void print_bytes(const uint8_t *bytes, size_t len) {
     for (size_t i = 0; i < len; i++) {

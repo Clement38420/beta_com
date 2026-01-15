@@ -1,5 +1,5 @@
 #include "test_crc16.h"
-#include "library.h"
+#include "beta_com.h"
 #include <stdio.h>
 
 void test_crc16(void) {
