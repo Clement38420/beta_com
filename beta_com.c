@@ -89,7 +89,7 @@ beta_com_err_t calculate_crc16(const uint8_t *data, size_t length, uint16_t *crc
 
     uint16_t crc = 0xFFFF;
 
-    for (int i = 0; i<length; i++) {
+    for (size_t i = 0; i<length; i++) {
         crc ^= data[i];
 
         for (int j = 0; j < 8; j++) {
