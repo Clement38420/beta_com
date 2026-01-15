@@ -2,17 +2,17 @@
 
 #include <string.h>
 
-beta_com_err_t cobs_encode(const uint8_t *input, size_t in_len, uint8_t *output, size_t *out_len) {
-    if (input == NULL || output == NULL || out_len == NULL) {
+int32_t cobs_encode(const uint8_t *input, size_t in_len, uint8_t *output, size_t max_out_len) {
+    if (input == NULL || output == NULL) {
         return BETA_COM_ERR_INVALID_ARGS;
     }
 
     const uint8_t *p_in = input;
     const uint8_t *p_in_end = input + in_len;
     uint8_t *p_out = output;
-    uint8_t *p_out_end = output + *out_len;
+    uint8_t *p_out_end = output + max_out_len;
 
-    if (*out_len < 2) return BETA_COM_ERR_BUFFER_TOO_SMALL;
+    if (max_out_len < 2) return BETA_COM_ERR_BUFFER_TOO_SMALL; // Need at least space for code byte and trailing zero
 
     uint8_t *p_code = p_out++; // Reserve space for the first code byte
     uint8_t code = 1;
@@ -44,19 +44,18 @@ beta_com_err_t cobs_encode(const uint8_t *input, size_t in_len, uint8_t *output,
     if (p_out >= p_out_end) return BETA_COM_ERR_BUFFER_TOO_SMALL;
     *p_out++ = 0x00; // Add the trailing zero byte
 
-    *out_len = (size_t)(p_out - output);
-    return BETA_COM_SUCCESS;
+    return (int32_t)(p_out - output);
 }
 
-beta_com_err_t cobs_decode(const uint8_t *input, size_t in_len, uint8_t *output, size_t *out_len) {
-    if (input == NULL || output == NULL || out_len == NULL) {
+int32_t cobs_decode(const uint8_t *input, size_t in_len, uint8_t *output, size_t max_out_len) {
+    if (input == NULL || output == NULL) {
         return BETA_COM_ERR_INVALID_ARGS;
     }
 
     const uint8_t *p_in = input;
     const uint8_t *p_in_end = input + in_len;
     uint8_t *p_out = output;
-    uint8_t *p_out_end = output + *out_len;
+    uint8_t *p_out_end = output + max_out_len;
 
 
     while (p_in < p_in_end) {
@@ -77,14 +76,12 @@ beta_com_err_t cobs_decode(const uint8_t *input, size_t in_len, uint8_t *output,
         }
     }
 
-    *out_len = (size_t)(p_out - output);
-
-    return BETA_COM_SUCCESS;
+    return (int32_t)(p_out - output);
 }
 
-beta_com_err_t calculate_crc16(const uint8_t *data, size_t length, uint16_t *crc_out) {
-    if (data == NULL || crc_out == NULL) {
-        return BETA_COM_ERR_INVALID_ARGS;
+uint16_t calculate_crc16(const uint8_t *data, size_t length) {
+    if (data == NULL) {
+        return 0;
     }
 
     uint16_t crc = 0xFFFF;
@@ -100,29 +97,9 @@ beta_com_err_t calculate_crc16(const uint8_t *data, size_t length, uint16_t *crc
             }
         }
     }
-    *crc_out = crc;
 
-    return BETA_COM_SUCCESS;
+    return crc;
 }
-
-beta_com_err_t check_crc16(const uint8_t *data, size_t length, uint16_t expected_crc) {
-    if (data == NULL) {
-        return BETA_COM_ERR_INVALID_ARGS;
-    }
-
-    uint16_t calculated_crc;
-    beta_com_err_t crc_err_code = calculate_crc16(data, length, &calculated_crc);
-    if (crc_err_code != 0) {
-        return crc_err_code;
-    }
-
-    return (calculated_crc == expected_crc) ? BETA_COM_SUCCESS : BETA_COM_ERR_CRC_MISMATCH;
-}
-
-beta_com_err_t generate_encoded_message(const uint8_t *input, size_t in_len, uint8_t *output, size_t *out_len, uint8_t *work_buffer, size_t work_len) {
-    if (input == NULL || output == NULL || out_len == NULL) {
-        return BETA_COM_ERR_INVALID_ARGS;
-    }
 
     uint16_t crc;
     beta_com_err_t crc_err_code = calculate_crc16(input, in_len, &crc);

@@ -32,49 +32,43 @@ typedef enum {
 beta_com_err_t cobs_encode(const uint8_t *input, size_t in_len, uint8_t *output, size_t *out_len);
 
 /**
- * COBS (Consistent Overhead Byte Stuffing) decoding function.
+ * @brief Encodes a byte buffer using the COBS algorithm.
  *
- * @param input Pointer to the input data buffer.
- * @param in_len Length of the input data buffer.
- * @param output Pointer to the output data buffer.
- * @param out_len Pointer to a variable that holds the size of the output buffer.
- *                On return, it will contain the length of the decoded data.
- * @return BETA_COM_SUCCESS (0) on success, error code (non-zero) on failure
+ * This function encodes the input data and automatically appends the
+ * packet delimiter (0x00) at the end of the output buffer.
+ *
+ * @param input         Pointer to the raw data to encode.
+ * @param in_len        Length of the raw data.
+ * @param output        Pointer to the destination buffer.
+ * @param max_out_len   Maximum capacity of the destination buffer.
+ * * @return Total number of bytes written to output (including the trailing 0x00). Or an error code < 0.
  */
-beta_com_err_t cobs_decode(const uint8_t *input, size_t in_len, uint8_t *output, size_t *out_len);
+int32_t cobs_encode(const uint8_t *input, size_t in_len, uint8_t *output, size_t max_out_len);
 
 /**
- * Calculates CRC16 checksum using the reflected polynomial 0xA001.
+ * @brief Decodes a COBS-encoded frame.
  *
- * @param data Pointer to the input data buffer.
- * @param length Length of the input data buffer.
- * @param crc_out Pointer to a variable where the calculated CRC16 will be stored.
- * @return BETA_COM_SUCCESS (0) on success, error code (non-zero) on failure
+ * Reconstructs the original data from a COBS frame. Stops decoding if a
+ * zero delimiter is encountered or the input length is reached.
+ *
+ * @param input         Pointer to the COBS-encoded data.
+ * @param in_len        Length of the encoded data.
+ * @param output        Pointer to the destination buffer.
+ * @param max_out_len   Maximum capacity of the destination buffer.
+ * * @return Length of the decoded payload.. Or an error code < 0.
  */
-beta_com_err_t calculate_crc16(const uint8_t *data, size_t length, uint16_t *crc_out);
+int32_t cobs_decode(const uint8_t *input, size_t in_len, uint8_t *output, size_t max_out_len);
 
 /**
- * Checks CRC16 checksum using the reflected polynomial 0xA001.
+ * @brief Calculates a CRC-16 checksum (Modbus/Reflected).
  *
- * @param data Pointer to the input data buffer.
- * @param length Length of the input data buffer.
- * @param expected_crc The expected CRC16 checksum to compare against.
- * @return BETA_COM_SUCCESS (0) on success, error code (non-zero) on failure
- */
-beta_com_err_t check_crc16(const uint8_t *data, size_t length, uint16_t expected_crc);
-
-/**
- * Generates an encoded message by appending CRC16 checksum and encoding with COBS.
+ * Uses polynomial 0xA001 with an initial value of 0xFFFF.
  *
- * @param input Pointer to the input data buffer.
- * @param in_len Length of the input data buffer.
- * @param output Pointer to the output data buffer.
- * @param out_len Pointer to a variable that holds the size of the output buffer. On return, it will contain the length of the encoded message.
- * @param work_buffer Pointer to a work buffer used during encoding.
- * @param work_len Length of the work buffer. Minimum required size is in_len + 2 (for CRC16).
- * @return BETA_COM_SUCCESS (0) on success, error code (non-zero) on failure
+ * @param data      Pointer to the data buffer.
+ * @param length    Length of the data buffer.
+ * * @return uint16_t: The calculated CRC16 value. Returns 0 if data is NULL.
  */
-beta_com_err_t generate_encoded_message(const uint8_t *input, size_t in_len, uint8_t *output, size_t *out_len, uint8_t *work_buffer, size_t work_len);
+uint16_t calculate_crc16(const uint8_t *data, size_t length);
 
 /**
  * Decodes a message by decoding with COBS and verifying the CRC16 checksum.
