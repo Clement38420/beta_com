@@ -9,27 +9,106 @@ extern "C" {
 #endif
 
 typedef enum {
-    BETA_COM_SUCCESS = 0,               // Operation successful
-    BETA_COM_ERR_INVALID_ARGS = -1,     // NULL pointers passed as parameters
-    BETA_COM_ERR_BUFFER_TOO_SMALL = -2, // Output or work buffer too small
-    BETA_COM_ERR_DATA_CORRUPTED = -3,   // COBS format error (e.g., pointer out of bounds)
-    BETA_COM_ERR_CRC_MISMATCH = -4,     // Calculated CRC does not match received CRC
-    BETA_COM_ERR_MSG_TOO_SHORT = -5     // Decoded message too short to contain a CRC
+    BETA_COM_SUCCESS = 0,                    // Operation successful
+    BETA_COM_ERR_INVALID_ARGS = -1,          // NULL pointers passed as parameters
+    BETA_COM_ERR_BUFFER_TOO_SMALL = -2,      // Output or work buffer too small
+    BETA_COM_ERR_INVALID_DATA = -3,          // General error for invalid data
+    BETA_COM_ERR_CRC_MISMATCH = -4,          // Calculated CRC does not match received CRC
+    BETA_COM_ERR_MSG_TOO_SHORT = -5,         // Decoded message too short to contain a CRC
+    BETA_COM_ERR_RB_FULL = -6,               // Full ring-buffer
+    BETA_COM_ERR_RB_EMPTY = -7,              // Empty ring-buffer
+    BETA_COM_ERR_NO_MESSAGE_FOUND = -8,      // No complete message found in the ring-buffer
+    BETA_COM_ERR_RB_NOT_ENOUGH_SPACE = -9    // Not enough space in the ring-buffer to push data
 } beta_com_err_t;
 
 #define CRC16_REFLECTED_POLY 0xA001
 
+typedef struct {
+    uint8_t *iov_base;
+    size_t iov_len;
+} beta_iovec_t;
+
+typedef struct {
+    uint8_t *buffer;
+    size_t head;
+    size_t tail;
+    size_t max_size;
+} ring_buffer_t;
+
 /**
- * COBS (Consistent Overhead Byte Stuffing) encoding function.
+ * @brief Initializes a ring buffer.
  *
- * @param input Pointer to the input data buffer.
- * @param in_len Length of the input data buffer.
- * @param output Pointer to the output data buffer.
- * @param out_len Pointer to a variable that holds the size of the output buffer.
- *                On return, it will contain the length of the encoded data.
- * @return BETA_COM_SUCCESS (0) on success, error code (non-zero) on failure
+ * @param rb Pointer to the ring buffer structure to initialize.
+ * @param storage_array Pointer to the memory buffer to be used by the ring buffer.
+ * @param size The size of the storage_array.
+ * @return BETA_COM_SUCCESS on success, or BETA_COM_ERR_INVALID_ARGS if rb or storage_array is NULL.
  */
-beta_com_err_t cobs_encode(const uint8_t *input, size_t in_len, uint8_t *output, size_t *out_len);
+beta_com_err_t rb_init(ring_buffer_t *rb, uint8_t *storage_array, size_t size);
+
+/**
+ * @brief Pushes a single byte into the ring buffer.
+ *
+ * @param rb Pointer to the ring buffer.
+ * @param data The byte to be pushed into the buffer.
+ * @return BETA_COM_SUCCESS on success, BETA_COM_ERR_RB_FULL if the buffer is full, or BETA_COM_ERR_INVALID_ARGS if rb is NULL.
+ */
+beta_com_err_t rb_push(ring_buffer_t *rb, uint8_t data);
+
+/**
+ * @brief Pops a single byte from the ring buffer.
+ *
+ * @param rb Pointer to the ring buffer.
+ * @param data Pointer to a variable where the popped byte will be stored.
+ * @return BETA_COM_SUCCESS on success, BETA_COM_ERR_RB_EMPTY if the buffer is empty, or BETA_COM_ERR_INVALID_ARGS if rb or data is NULL.
+ */
+beta_com_err_t rb_pop(ring_buffer_t *rb, uint8_t *data);
+
+/**
+ * @brief Returns the number of bytes currently stored in the ring buffer.
+ *
+ * @param rb The ring buffer.
+ * @return The number of bytes available to be read from the buffer.
+ */
+size_t rb_available_size(ring_buffer_t rb);
+
+/**
+ * @brief Searches for the first occurrence of a specific byte in the ring buffer.
+ *
+ * @param rb Pointer to the ring buffer.
+ * @param byte The byte to search for.
+ * @return A pointer to the first occurrence of the byte within the buffer's linear memory, or NULL if the byte is not found.
+ */
+uint8_t* rbchr(const ring_buffer_t *rb, uint8_t byte);
+
+typedef struct {
+    ring_buffer_t rx_rb;
+    uint8_t *rx_work_buff;
+    size_t rx_wb_size;
+
+    ring_buffer_t tx_rb;
+    uint8_t *tx_work_buff;
+    size_t tx_wb_size;
+} beta_com_handle_t;
+
+typedef struct {
+    uint8_t *rx_rb_storage;
+    size_t rx_rb_size;
+    uint8_t *rx_work_buff;
+    size_t rx_work_buff_size;
+    uint8_t *tx_rb_storage;
+    size_t tx_rb_size;
+    uint8_t *tx_work_buff;
+    size_t tx_work_buff_size;
+} beta_com_config_t;
+
+/**
+ * @brief Initializes a beta_com handle with the provided configuration.
+ *
+ * @param handle Pointer to the beta_com handle to initialize.
+ * @param config Pointer to the configuration structure containing buffer pointers and sizes.
+ * @return BETA_COM_SUCCESS on success, or an error code on failure.
+ */
+beta_com_err_t beta_com_init(beta_com_handle_t *handle, const beta_com_config_t *config);
 
 /**
  * @brief Encodes a byte buffer using the COBS algorithm.
@@ -37,13 +116,13 @@ beta_com_err_t cobs_encode(const uint8_t *input, size_t in_len, uint8_t *output,
  * This function encodes the input data and automatically appends the
  * packet delimiter (0x00) at the end of the output buffer.
  *
- * @param input         Pointer to the raw data to encode.
- * @param in_len        Length of the raw data.
+ * @param buffers     Buffers to encode
+ * @param buffers_count        Number of buffers
  * @param output        Pointer to the destination buffer.
  * @param max_out_len   Maximum capacity of the destination buffer.
  * * @return Total number of bytes written to output (including the trailing 0x00). Or an error code < 0.
  */
-int32_t cobs_encode(const uint8_t *input, size_t in_len, uint8_t *output, size_t max_out_len);
+int32_t cobs_encode(const beta_iovec_t *buffers, size_t buffers_count, uint8_t *output, size_t max_out_len);
 
 /**
  * @brief Decodes a COBS-encoded frame.
@@ -71,15 +150,30 @@ int32_t cobs_decode(const uint8_t *input, size_t in_len, uint8_t *output, size_t
 uint16_t calculate_crc16(const uint8_t *data, size_t length);
 
 /**
- * Decodes a message by decoding with COBS and verifying the CRC16 checksum.
+ * @brief Receives a complete message from the communication handle.
  *
- * @param input Pointer to the input data buffer.
- * @param in_len Length of the input data buffer.
- * @param output Pointer to the output data buffer.
- * @param out_len Pointer to a variable that holds the size of the output buffer. On return, it will contain the length of the decoded data.
- * @return BETA_COM_SUCCESS (0) on success, error code (non-zero) on failure
+ * This function processes the incoming byte stream, decodes a COBS frame,
+ * verifies its CRC, and returns the payload.
+ *
+ * @param handle Pointer to the beta_com handle.
+ * @param buff Pointer to the buffer where the received message payload will be stored.
+ * @param buff_size The maximum size of the receive buffer.
+ * @return The length of the received message payload on success, or a negative error code on failure.
  */
-beta_com_err_t decode_message(const uint8_t *input, size_t in_len, uint8_t *output, size_t *out_len);
+int32_t receive_message(beta_com_handle_t *handle, uint8_t *buff, size_t buff_size);
+
+/**
+ * @brief Sends a message through the communication handle.
+ *
+ * This function takes a payload, calculates its CRC, COBS-encodes it,
+ * and places it into the transmission buffer.
+ *
+ * @param handle Pointer to the beta_com handle.
+ * @param buff Pointer to the message payload to send.
+ * @param buff_size The length of the message payload.
+ * @return The number of bytes written to the transmission buffer on success, or a negative error code on failure.
+ */
+int32_t send_message(beta_com_handle_t *handle, const uint8_t *buff, size_t buff_size);
 
 #ifdef __cplusplus
 }
