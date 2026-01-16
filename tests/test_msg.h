@@ -1,6 +1,7 @@
-#ifndef BETA_COM_TEST_MSG_H
-#define BETA_COM_TEST_MSG_H
+#ifndef TEST_MSG_H
+#define TEST_MSG_H
 
-void test_msg(void);
+void test_msg_loopback(void);
 
-#endif //BETA_COM_TEST_MSG_H
+#endif //TEST_MSG_H
+

@@ -1,77 +1,87 @@
-#include "test_msg.h"
+#include <assert.h>
+#include <string.h>
+#include "../beta_com.h"
 
-#include <stdint.h>
+// Simulation de mémoire
+static uint8_t rx_storage[128];
+static uint8_t tx_storage[128];
+static uint8_t rx_work[128];
+static uint8_t tx_work[128];
+
+#include "test_msg.h"
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
+#include "../beta_com.h"
 
-#include "library.h"
-
-void print_bytes(const uint8_t *bytes, size_t len) {
+// Helper to print buffer contents
+static void print_bytes(const char* prefix, const uint8_t *bytes, size_t len) {
+    printf("%s[%zu bytes]: ", prefix, len);
     for (size_t i = 0; i < len; i++) {
         printf("%02x ", bytes[i]);
     }
+    printf("\n");
 }
 
-void test_msg(void) {
-    printf("--- TEST: ENCODE & DECODE LOOP ---\n");
+// Helper to print ring buffer state
+static void print_ring_buffer_state(const char* name, const ring_buffer_t* rb) {
+    size_t used = (rb->head - rb->tail + rb->max_size) % rb->max_size;
+    printf("  %s state: head=%zu, tail=%zu, used=%zu, size=%zu\n", name, rb->head, rb->tail, used, rb->max_size);
+}
 
-    // Testing data
-    const uint8_t original_data[] = {0x01, 0x02, 0x00, 0x03, 0xFF, 0xFE};
-    size_t original_len = sizeof(original_data);
+void test_msg_loopback(void) {
+    printf("--- TEST: MESSAGE SEND/RECEIVE LOOPBACK ---\n");
 
-    // Buffers definition
-    uint8_t work_buffer[128];
-    uint8_t encoded_buffer[128];
-    size_t encoded_len = sizeof(encoded_buffer);
+    // Memory simulation for the communication handle
+    static uint8_t rx_storage[128];
+    static uint8_t tx_storage[128];
+    static uint8_t rx_work[128];
+    static uint8_t tx_work[128];
 
-    uint8_t decoded_buffer[128];
-    size_t decoded_len = sizeof(decoded_buffer);
+    beta_com_handle_t h;
+    beta_com_config_t conf = {
+        .rx_rb_storage = rx_storage, .rx_rb_size = sizeof(rx_storage),
+        .rx_work_buff = rx_work,     .rx_work_buff_size = sizeof(rx_work),
+        .tx_rb_storage = tx_storage, .tx_rb_size = sizeof(tx_storage),
+        .tx_work_buff = tx_work,     .tx_work_buff_size = sizeof(tx_work)
+    };
 
-    printf("Data to encode : ");
-    print_bytes(original_data, original_len);
-    printf("\n\n");
+    // 1. Initialization
+    printf("Step 1: Initializing communication handle...\n");
+    assert(beta_com_init(&h, &conf) == BETA_COM_SUCCESS);
+    print_ring_buffer_state("TX Buffer", &h.tx_rb);
+    print_ring_buffer_state("RX Buffer", &h.rx_rb);
 
-    // Data encoding
-    int enc_res = generate_encoded_message(
-        original_data, original_len,
-        encoded_buffer, &encoded_len,
-        work_buffer, sizeof(work_buffer)
-    );
+    // 2. Send message
+    const uint8_t msg_out[] = "Hello World!";
+    printf("\nStep 2: Sending message...\n");
+    print_bytes("  Payload to send ", msg_out, sizeof(msg_out));
+    int32_t sent_len = send_message(&h, msg_out, sizeof(msg_out));
+    assert(sent_len > 0);
+    printf("  %d bytes written to TX work buffer and then pushed to TX ring buffer.\n", sent_len);
+    print_ring_buffer_state("TX Buffer", &h.tx_rb);
 
-    if (enc_res != 0) {
-        printf("FAILED: Encoding returned error %d\n", enc_res);
-        return;
+    // 3. Hardware Loopback Simulation
+    printf("\nStep 3: Simulating hardware loopback (TX -> RX)...\n");
+    uint8_t byte;
+    while(rb_pop(&h.tx_rb, &byte) == BETA_COM_SUCCESS) {
+        assert(rb_push(&h.rx_rb, byte) == BETA_COM_SUCCESS);
     }
+    printf("  Loopback complete. Data moved from TX to RX buffer.\n");
+    print_ring_buffer_state("TX Buffer", &h.tx_rb);
+    print_ring_buffer_state("RX Buffer", &h.rx_rb);
 
-    printf("Encoded data : ");
-    print_bytes(encoded_buffer, encoded_len);
-    printf("\n");
+    // 4. Receive message
+    uint8_t msg_in[64];
+    printf("\nStep 4: Receiving message...\n");
+    int32_t rcv_len = receive_message(&h, msg_in, sizeof(msg_in));
+    assert(rcv_len > 0);
+    print_bytes("  Received payload", (uint8_t*)msg_in, rcv_len);
+    print_ring_buffer_state("RX Buffer", &h.rx_rb);
 
-    printf("Encoded size: %zu bytes\n\n", encoded_len);
-
-    // Data decoding
-    int dec_res = decode_message(
-        encoded_buffer, encoded_len,
-        decoded_buffer, &decoded_len
-    );
-
-    if (dec_res != 0) {
-        printf("FAILED: Decoding returned error %d (CRC mismatch or format error)\n", dec_res);
-        return;
-    }
-
-    printf("Decoded data : ");
-    print_bytes(decoded_buffer, decoded_len);
-    printf("\n");
-    printf("Decoded size: %zu bytes\n\n", decoded_len);
-
-    // Final comparaison
-    if (decoded_len != original_len) {
-        printf("FAILED: Size mismatch (Expected %zu, Got %zu)\n", original_len, decoded_len);
-    } else if (memcmp(original_data, decoded_buffer, original_len) != 0) {
-        printf("FAILED: Data mismatch (Content differs)\n");
-    } else {
-        printf("SUCCESS: Original data matches decoded data exactly.\n");
-    }
-    printf("\n");
+    // 5. Verification
+    printf("\nStep 5: Verifying message integrity...\n");
+    assert(rcv_len == sizeof(msg_out));
+    assert(memcmp(msg_out, msg_in, rcv_len) == 0);
+    printf("SUCCESS: Sent and received messages are identical.\n\n");
 }

@@ -1,6 +1,7 @@
-#ifndef BETA_COM_TEST_COBS_H
-#define BETA_COM_TEST_COBS_H
+#ifndef TEST_COBS_H
+#endif //TEST_COBS_H
 
-void test_cobs(void);
+void test_cobs_suite(void);
 
-#endif //BETA_COM_TEST_COBS_H
+#define TEST_COBS_H
+
