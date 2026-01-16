@@ -8,6 +8,10 @@
 extern "C" {
 #endif
 
+#define CRC16_REFLECTED_POLY 0xA001
+#define BETA_COM_CALC_WORK_SIZE(payload_size) ((payload_size) + 2 + ((payload_size + 2) / 254) + 2) // PAYLAOD + 2 CRC bytes + COBS overhead + 1 trailing 0x00
+#define BETA_COM_RING_BUFFER_MULTIPLIER 4 // Multiplier for ring-buffer size relative to a full size message
+
 typedef enum {
     BETA_COM_SUCCESS = 0,                    // Operation successful
     BETA_COM_ERR_INVALID_ARGS = -1,          // NULL pointers passed as parameters
@@ -18,10 +22,9 @@ typedef enum {
     BETA_COM_ERR_RB_FULL = -6,               // Full ring-buffer
     BETA_COM_ERR_RB_EMPTY = -7,              // Empty ring-buffer
     BETA_COM_ERR_NO_MESSAGE_FOUND = -8,      // No complete message found in the ring-buffer
-    BETA_COM_ERR_RB_NOT_ENOUGH_SPACE = -9    // Not enough space in the ring-buffer to push data
+    BETA_COM_ERR_RB_NOT_ENOUGH_SPACE = -9,   // Not enough space in the ring-buffer to push data
+    BETA_COM_ERR_OUT_OF_MEMORY = -10         // Dynamic memory allocation failed
 } beta_com_err_t;
-
-#define CRC16_REFLECTED_POLY 0xA001
 
 typedef struct {
     uint8_t *iov_base;
@@ -88,6 +91,8 @@ typedef struct {
     ring_buffer_t tx_rb;
     uint8_t *tx_work_buff;
     size_t tx_wb_size;
+
+    uint8_t is_dynamic;
 } beta_com_handle_t;
 
 typedef struct {
@@ -99,6 +104,7 @@ typedef struct {
     size_t tx_rb_size;
     uint8_t *tx_work_buff;
     size_t tx_work_buff_size;
+    uint8_t use_dynamic_alloc;
 } beta_com_config_t;
 
 /**
@@ -109,6 +115,24 @@ typedef struct {
  * @return BETA_COM_SUCCESS on success, or an error code on failure.
  */
 beta_com_err_t beta_com_init(beta_com_handle_t *handle, const beta_com_config_t *config);
+
+/**
+ * @brief Initializes a beta_com handle with automatic buffer allocation.
+ *
+ * This function allocates necessary buffers based on the specified maximum payload size.
+ *
+ * @param handle Pointer to the beta_com handle to initialize.
+ * @param max_payload_size Maximum expected payload size for messages.
+ * @return BETA_COM_SUCCESS on success, or an error code on failure.
+ */
+beta_com_err_t beta_com_init_easy(beta_com_handle_t *handle, size_t max_payload_size);
+
+/**
+ * @brief Deinitializes a beta_com handle and frees allocated resources.
+ *
+ * @param handle Pointer to the beta_com handle to deinitialize.
+ */
+void beta_com_deinit(beta_com_handle_t *handle);
 
 /**
  * @brief Encodes a byte buffer using the COBS algorithm.

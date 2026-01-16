@@ -34,24 +34,33 @@ make
 ./unit_tests
 ```
 
-## High-Level API Usage
+## Memory Management and Manual Initialization
 
-The primary way to use the library is through the `beta_com_handle_t`, which manages all the buffers and state.
+The library is designed for embedded systems and does not perform any dynamic memory allocation (`malloc`). You must provide all the necessary memory buffers to the library during initialization.
 
-### 1. Initialization
+The `beta_com_handle_t` is the central structure that holds the state of the communication channel, including ring buffers and work buffers. It is initialized using a `beta_com_config_t` structure.
 
-First, define the memory for the handle's buffers and initialize it.
+### `beta_com_config_t` Structure
+
+This structure holds pointers to the memory buffers and their sizes.
+
+*   `rx_rb_storage` & `rx_rb_size`: Memory for the receive ring buffer.
+*   `tx_rb_storage` & `tx_rb_size`: Memory for the transmit ring buffer.
+*   `rx_work_buff` & `rx_work_buff_size`: A temporary buffer used during message reception and decoding. It should be large enough to hold the largest expected decoded message.
+*   `tx_work_buff` & `tx_work_buff_size`: A temporary buffer used during message sending and encoding. It should be large enough to hold the largest expected payload plus CRC and COBS overhead.
+
+### Initialization Example
 
 ```c
 #include "beta_com.h"
 
-// 1. Define storage for the handle's buffers
+// 1. Define storage for all required buffers
 uint8_t rx_rb_storage[256];
 uint8_t tx_rb_storage[256];
 uint8_t rx_work_buff[256];
 uint8_t tx_work_buff[256];
 
-// 2. Create a configuration structure
+// 2. Create and populate the configuration structure
 beta_com_config_t config = {
     .rx_rb_storage = rx_rb_storage,
     .rx_rb_size = sizeof(rx_rb_storage),
@@ -70,10 +79,59 @@ if (err != BETA_COM_SUCCESS) {
     // Handle initialization error
 }
 ```
+## Simplified Initialization (Dynamic Allocation)
 
-### 2. Sending a Message
+For systems that support dynamic memory allocation (malloc/free), the library offers two simplified initialization methods to avoid manual buffer management.
+### 1. Easy Mode (beta_com_init_easy)
 
-The `send_message` function automates CRC calculation, COBS encoding, and places the result in the TX ring buffer.
+This is the fastest way to get started. You simply provide the maximum payload size you intend to send/receive, and the library automatically calculates the required overhead (COBS, CRC, Ring Buffer ratios) and allocates the memory.
+```C
+
+beta_com_handle_t handle;
+
+// Initialize for a maximum payload of 64 bytes.
+// The library handles all math and allocation internally.
+if (beta_com_init_easy(&handle, 64) != BETA_COM_SUCCESS) {
+// Handle allocation error
+}
+
+// ... use the library ...
+
+// When finished, free the memory
+beta_com_deinit(&handle);
+```
+
+### 2. Manual Configuration with Dynamic Allocation
+
+If you need specific buffer sizes but still want the library to handle the allocation, you can use the use_dynamic_alloc flag in the configuration structure.
+```C
+beta_com_config_t config = {
+.use_dynamic_alloc = true,  // Enable internal malloc
+
+    // Define sizes only (pointers are ignored)
+    .rx_rb_size = 1024,
+    .tx_rb_size = 1024,
+    .rx_work_buff_size = 128,
+    .tx_work_buff_size = 128,
+    
+    .rx_rb_storage = NULL, // Ignored
+    .tx_rb_storage = NULL  // Ignored
+};
+
+beta_com_handle_t handle;
+beta_com_init(&handle, &config);
+
+// ... use the library ...
+
+// Clean up
+beta_com_deinit(&handle);
+```
+
+Note: When using beta_com_init_easy or use_dynamic_alloc, you must call beta_com_deinit(&handle) when you are done using the library to prevent memory leaks.
+
+## High-Level API Usage
+
+### Sending a Message
 
 ```c
 const uint8_t payload[] = {0x01, 0x02, 0x03};

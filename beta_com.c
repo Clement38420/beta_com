@@ -1,9 +1,50 @@
 #include "beta_com.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 beta_com_err_t beta_com_init(beta_com_handle_t *handle, const beta_com_config_t *config) {
     if (handle == NULL || config == NULL) return BETA_COM_ERR_INVALID_ARGS;
+
+    if (config->use_dynamic_alloc == 1) {
+        handle->is_dynamic = 1;
+
+        int err_code = 0;
+        handle->tx_work_buff = malloc(config->tx_work_buff_size);
+        err_code |= (handle->tx_work_buff == NULL);
+        handle->rx_work_buff = malloc(config->rx_work_buff_size);
+        err_code |= (handle->rx_work_buff == NULL);
+        handle->tx_rb.buffer = malloc(config->tx_rb_size);
+        err_code |= (handle->tx_rb.buffer == NULL);
+        handle->rx_rb.buffer = malloc(config->rx_rb_size);
+        err_code |= (handle->rx_rb.buffer == NULL);
+
+        if (err_code != 0) {
+            free(handle->tx_work_buff);
+            free(handle->rx_work_buff);
+            free(handle->tx_rb.buffer);
+            free(handle->rx_rb.buffer);
+            return BETA_COM_ERR_OUT_OF_MEMORY;
+        }
+
+        handle->tx_wb_size = config->tx_work_buff_size;
+        handle->rx_wb_size = config->rx_work_buff_size;
+
+        handle->tx_rb = (ring_buffer_t){
+            .buffer = handle->tx_rb.buffer,
+            .head = 0,
+            .tail = 0,
+            .max_size = config->tx_rb_size
+        };
+        handle->rx_rb = (ring_buffer_t){
+            .buffer = handle->rx_rb.buffer,
+            .head = 0,
+            .tail = 0,
+            .max_size = config->rx_rb_size
+        };
+
+        return BETA_COM_SUCCESS;
+    }
 
     if (config->rx_rb_storage == NULL) return BETA_COM_ERR_INVALID_ARGS;
     handle->rx_rb = (ring_buffer_t){
@@ -29,6 +70,39 @@ beta_com_err_t beta_com_init(beta_com_handle_t *handle, const beta_com_config_t 
     handle->tx_work_buff = config->tx_work_buff;
     handle->tx_wb_size = config->tx_work_buff_size;
     return BETA_COM_SUCCESS;
+}
+
+beta_com_err_t beta_com_init_easy(beta_com_handle_t *handle, size_t max_payload_size) {
+    if (max_payload_size == 0) return BETA_COM_ERR_INVALID_ARGS;
+
+    size_t work_buff_size = BETA_COM_CALC_WORK_SIZE(max_payload_size);
+
+    size_t rb_size = work_buff_size * BETA_COM_RING_BUFFER_MULTIPLIER;
+
+    beta_com_config_t auto_conf = {
+        .use_dynamic_alloc = 1,
+
+        .rx_work_buff_size = work_buff_size,
+        .tx_work_buff_size = work_buff_size,
+
+        .rx_rb_size = rb_size,
+        .tx_rb_size = rb_size,
+    };
+
+    return beta_com_init(handle, &auto_conf);
+}
+
+void beta_com_deinit(beta_com_handle_t *handle) {
+    if (handle == NULL) return;
+
+    if (handle->is_dynamic) {
+        free(handle->tx_work_buff);
+        free(handle->rx_work_buff);
+        free(handle->tx_rb.buffer);
+        free(handle->rx_rb.buffer);
+    }
+
+    memset(handle, 0, sizeof(beta_com_handle_t));
 }
 
 int32_t cobs_encode(const beta_iovec_t *buffers, size_t buffers_count, uint8_t *output, size_t max_out_len) {
