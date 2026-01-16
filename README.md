@@ -1,12 +1,15 @@
 # beta_com Library
 
-A lightweight C library designed for **UART communication**, providing **COBS (Consistent Overhead Byte Stuffing)** encoding/decoding and **CRC16** checksum calculation.
+A lightweight C library designed for robust serial communication, providing high-level message handling, COBS encoding/decoding, CRC16 integrity checks, and ring-buffer-based stream processing.
 
 ## Features
 
-* **COBS Encoding/Decoding**: Frames data using `0x00` as a delimiter, ensuring the payload itself contains no zero bytes. Ideal for packet delineation over serial streams.
-* **CRC16 Integrity Check**: Implements CRC-16 according to the **Modbus** standard (reflected polynomial `0xA001`).
-* **CMake Support**: Easy integration via CMake with optional unit tests.
+*   **High-Level Message Handling**: Simple `send_message` and `receive_message` functions to handle packetization, encoding, and decoding automatically.
+*   **Ring Buffers**: Integrated RX and TX ring buffers to manage asynchronous data streams efficiently.
+*   **COBS Encoding/Decoding**: Frames data using `0x00` as a delimiter, ensuring the payload itself contains no zero bytes. Ideal for packet delineation over serial streams.
+*   **CRC16 Integrity Check**: Implements CRC-16 according to the **Modbus** standard (reflected polynomial `0xA001`) to ensure data integrity.
+*   **Zero-Copy IOVECs**: `cobs_encode` uses I/O vectors (`beta_iovec_t`) to encode data from multiple non-contiguous memory blocks without prior copying.
+*   **CMake Support**: Easy integration via CMake with optional unit tests.
 
 ## Build Instructions
 
@@ -18,131 +21,157 @@ mkdir build
 cd build
 cmake ..
 make
-
 ```
 
 ### Building Unit Tests
 
-To build the unit tests, set the `BUILD_TESTS` option to `ON` (default is `OFF`):
+To build the unit tests, set the `BUILD_TESTS` option to `ON`:
 
 ```bash
 cmake -DBUILD_TESTS=ON ..
 make
 # Run tests
 ./unit_tests
-
 ```
 
-## Usage
+## High-Level API Usage
 
-Include the header in your application:
+The primary way to use the library is through the `beta_com_handle_t`, which manages all the buffers and state.
+
+### 1. Initialization
+
+First, define the memory for the handle's buffers and initialize it.
 
 ```c
-#include "library.h"
+#include "beta_com.h"
 
+// 1. Define storage for the handle's buffers
+uint8_t rx_rb_storage[256];
+uint8_t tx_rb_storage[256];
+uint8_t rx_work_buff[256];
+uint8_t tx_work_buff[256];
+
+// 2. Create a configuration structure
+beta_com_config_t config = {
+    .rx_rb_storage = rx_rb_storage,
+    .rx_rb_size = sizeof(rx_rb_storage),
+    .rx_work_buff = rx_work_buff,
+    .rx_work_buff_size = sizeof(rx_work_buff),
+    .tx_rb_storage = tx_rb_storage,
+    .tx_rb_size = sizeof(tx_rb_storage),
+    .tx_work_buff = tx_work_buff,
+    .tx_work_buff_size = sizeof(tx_work_buff),
+};
+
+// 3. Initialize the handle
+beta_com_handle_t handle;
+beta_com_err_t err = beta_com_init(&handle, &config);
+if (err != BETA_COM_SUCCESS) {
+    // Handle initialization error
+}
 ```
 
-### 1. COBS Encoding & Decoding
+### 2. Sending a Message
 
-**Important:** You must initialize the `out_len` variable with the **maximum capacity** of your output buffer before calling the functions. Upon return, it will contain the actual length of the processed data.
+The `send_message` function automates CRC calculation, COBS encoding, and places the result in the TX ring buffer.
 
 ```c
-uint8_t raw_data[] = {0x11, 0x00, 0x22};
-uint8_t encoded[256];
-size_t encoded_len = sizeof(encoded); // MUST initialize with buffer capacity
+const uint8_t payload[] = {0x01, 0x02, 0x03};
 
-// Encoding
-if (cobs_encode(raw_data, sizeof(raw_data), encoded, &encoded_len) == 0) {
-    // encoded now contains the COBS frame (ending with 0x00)
-    // Ready to be sent over UART
+// The function handles CRC, COBS, and adds the final frame to the TX buffer.
+int32_t bytes_sent = send_message(&handle, payload, sizeof(payload));
+
+if (bytes_sent < 0) {
+    // Handle error (e.g., buffer full)
 }
 
-// Decoding
-uint8_t decoded[256];
-size_t decoded_len = sizeof(decoded); // MUST initialize with buffer capacity
-
-// Note: Decoding usually processes data up to the delimiter.
-if (cobs_decode(encoded, encoded_len, decoded, &decoded_len) == 0) {
-    // decoded contains {0x11, 0x00, 0x22}
+// Now, you can read `bytes_sent` from `handle.tx_rb` and send them over UART.
+// Example:
+uint8_t byte_to_transmit;
+while (rb_pop(&handle.tx_rb, &byte_to_transmit) == BETA_COM_SUCCESS) {
+    // uart_send_byte(byte_to_transmit);
 }
-
 ```
 
-### 2. CRC16 Calculation (Modbus)
+### 3. Receiving a Message
 
-Calculates a 16-bit checksum to ensure data integrity using the Modbus standard.
+Push incoming bytes from your hardware (e.g., UART) into the RX ring buffer. Then, call `receive_message` to process the stream.
+
+```c
+// In your UART RX interrupt or polling loop:
+// uint8_t received_byte = uart_read_byte();
+// rb_push(&handle.rx_rb, received_byte);
+
+// In your main loop, try to decode a message
+uint8_t message_buffer[128];
+int32_t message_len = receive_message(&handle, message_buffer, sizeof(message_buffer));
+
+if (message_len > 0) {
+    // A complete, valid message was received!
+    // `message_buffer` contains the payload, and `message_len` is its size.
+} else if (message_len == BETA_COM_ERR_NO_MESSAGE_FOUND) {
+    // Not enough data yet to form a complete message.
+} else {
+    // An error occurred (e.g., CRC mismatch, buffer too small).
+}
+```
+
+## Low-Level API
+
+For advanced use cases, you can use the low-level functions directly.
+
+### `cobs_encode`
+
+Encodes data from one or more buffers (`beta_iovec_t`) into a COBS frame.
+
+```c
+uint8_t header[] = {0x01, 0x02};
+uint8_t payload[] = {0x00, 0x03, 0x04};
+uint8_t encoded_buffer[32];
+
+beta_iovec_t buffers[] = {
+    { .iov_base = header, .iov_len = sizeof(header) },
+    { .iov_base = payload, .iov_len = sizeof(payload) }
+};
+
+// Returns the encoded length, including the final 0x00 delimiter.
+int32_t encoded_len = cobs_encode(buffers, 2, encoded_buffer, sizeof(encoded_buffer));
+```
+
+### `cobs_decode`
+
+Decodes a COBS frame back into its original data.
+
+```c
+// encoded_buffer from the example above
+uint8_t decoded_buffer[32];
+int32_t decoded_len = cobs_decode(encoded_buffer, encoded_len, decoded_buffer, sizeof(decoded_buffer));
+```
+
+### `calculate_crc16`
+
+Calculates the CRC-16/Modbus checksum for a data buffer.
 
 ```c
 uint8_t data[] = {0x01, 0x02, 0x03};
-uint16_t crc;
-
-// Calculate
-if (calculate_crc16(data, sizeof(data), &crc) == 0) {
-    // crc contains the Modbus checksum
-}
-
-// Verify
-if (check_crc16(data, sizeof(data), expected_crc_val) == 0) {
-    // Data is valid
-}
-
+uint16_t crc = calculate_crc16(data, sizeof(data));
+// crc now holds the calculated checksum.
 ```
-
-## Main API
-
-The main API provides a simplified interface for generating and decoding messages with CRC16 and COBS.
-
-### 1. Generate Encoded Message
-
-This function automates the process of calculating the CRC16, appending it to the data, and then COBS-encoding the result.
-
-```c
-uint8_t raw_data[] = {0x01, 0x02, 0x03};
-uint8_t encoded_message[256];
-size_t encoded_len = sizeof(encoded_message);
-
-// A work buffer is required to store the data + CRC before encoding.
-// It must be at least sizeof(raw_data) + 2 bytes.
-uint8_t work_buffer[sizeof(raw_data) + 2];
-
-if (generate_encoded_message(raw_data, sizeof(raw_data), encoded_message, &encoded_len, work_buffer, sizeof(work_buffer)) == 0) {
-    // encoded_message now contains the COBS-encoded frame with CRC
-    // Ready to be sent over UART
-}
-```
-
-### 2. Decode Message
-
-This function decodes a COBS frame and verifies its integrity using the CRC16 checksum.
-
-```c
-uint8_t received_frame[] = {0x04, 0x01, 0x02, 0x03, 0x41, 0x73, 0x00}; // Example frame
-uint8_t decoded_payload[256];
-size_t decoded_len = sizeof(decoded_payload);
-
-if (decode_message(received_frame, sizeof(received_frame), decoded_payload, &decoded_len) == 0) {
-    // decoded_payload contains the original data {0x01, 0x02, 0x03}
-    // CRC check was successful
-}
-```
-
-## Points of Vigilance
-
-1. **Buffer Initialization**: The `out_len` pointer passed to `cobs_encode` and `cobs_decode` serves a dual purpose. **Input**: Max buffer size. **Output**: Actual written size. Failing to initialize it with the buffer size will lead to errors (return code `1`) or buffer overflows.
-2. **COBS Overhead**: The output buffer for `cobs_encode` must be larger than the input. Worst case overhead is 1 byte per 254 bytes of data, plus 1 overhead byte, plus 1 byte for the trailing zero.
-3. **CRC Standard**: This library uses the **Modbus** standard (reflected polynomial `0xA001`). Ensure both the UART sender and receiver use this exact CRC configuration.
-4. **Zero Delimiter**: `cobs_encode` automatically appends a `0x00` byte at the end of the frame. `cobs_decode` expects a valid COBS sequence.
 
 ## Error Codes
 
-All functions return a `beta_com_err_t` value. A return value of `BETA_COM_SUCCESS` (0) indicates success. Any other value indicates an error.
+Functions returning an `int32_t` or `beta_com_err_t` will provide a status code. `BETA_COM_SUCCESS` (0) or a positive value (indicating length) means success.
 
 | Code                          | Value | Description                                                              |
 |-------------------------------|-------|--------------------------------------------------------------------------|
 | `BETA_COM_SUCCESS`            | 0     | Operation successful.                                                    |
 | `BETA_COM_ERR_INVALID_ARGS`   | -1    | A `NULL` pointer was passed for a required parameter.                    |
 | `BETA_COM_ERR_BUFFER_TOO_SMALL` | -2    | The provided output or work buffer is not large enough for the result.   |
-| `BETA_COM_ERR_DATA_CORRUPTED`   | -3    | The input data for `cobs_decode` is not a valid COBS-encoded sequence.   |
+| `BETA_COM_ERR_INVALID_DATA`   | -3    | The input for `cobs_decode` is not a valid COBS-encoded sequence.        |
 | `BETA_COM_ERR_CRC_MISMATCH`     | -4    | The CRC16 checksum of the decoded data does not match the expected value. |
 | `BETA_COM_ERR_MSG_TOO_SHORT`    | -5    | The decoded message is too short to contain a valid CRC16 checksum.      |
+| `BETA_COM_ERR_RB_FULL`          | -6    | The ring buffer is full.                                                 |
+| `BETA_COM_ERR_RB_EMPTY`         | -7    | The ring buffer is empty.                                                |
+| `BETA_COM_ERR_NO_MESSAGE_FOUND` | -8    | No complete message (ending in 0x00) was found in the ring buffer.       |
+| `BETA_COM_ERR_RB_NOT_ENOUGH_SPACE` | -9 | Not enough space in the ring buffer to push the entire message.          |
 
