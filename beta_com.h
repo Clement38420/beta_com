@@ -122,6 +122,7 @@ typedef struct {
     ring_buffer_t rx_rb;
     uint8_t *rx_work_buff;
     size_t rx_wb_size;
+    size_t rx_search_from;
 
     ring_buffer_t tx_rb;
     uint8_t *tx_work_buff;

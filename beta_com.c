@@ -33,6 +33,7 @@ beta_com_err_t beta_com_init(beta_com_handle_t *handle, const beta_com_config_t 
         handle->rx_wb_size = config->rx_work_buff_size;
 
         rb_init(&handle->rx_rb, handle->rx_rb.buffer, config->rx_rb_size);
+        handle->rx_search_from = atomic_load(&handle->rx_rb.tail);
         rb_init(&handle->tx_rb, handle->tx_rb.buffer, config->tx_rb_size);
 
         return BETA_COM_SUCCESS;
@@ -303,26 +304,44 @@ uint8_t* rbchr(const ring_buffer_t *rb, uint8_t byte) {
 }
 
 int32_t receive_message(beta_com_handle_t *handle, uint8_t *buff, size_t buff_size) {
-    // Find the next message delimiter (0x00)
-    uint8_t *p_end = rbchr(&(handle->rx_rb), 0x00);
-    if (p_end == NULL) return BETA_COM_ERR_NO_MESSAGE_FOUND;
+    size_t tail = atomic_load(&handle->rx_rb.tail);
+    size_t head = atomic_load(&handle->rx_rb.head);
+
+    // Find the next message delimiter (0x00) in the ring buffer
+    // Search from previous search finish index to head, handling wrap-around
+    if ((tail < head && (handle->rx_search_from > head || handle->rx_search_from < tail)) ||
+        (tail > head && (handle->rx_search_from > head && handle->rx_search_from < tail))) {
+        handle->rx_search_from = tail; // Reset search_from to tail if the search index is out of bounds
+    }
+
+    size_t i = handle->rx_search_from;
+    size_t end = i;
+    while (i != head) {
+        if (handle->rx_rb.buffer[i] == 0x00) {
+            end = i;
+            break;
+        }
+        i = (i + 1) % handle->rx_rb.max_size;
+    }
+    handle->rx_search_from = i; // Update search_from for next call
+    if (i == head) return BETA_COM_ERR_NO_MESSAGE_FOUND;
 
     // Calculate the full message size, accounting for buffer wrap-around
-    size_t end = p_end - handle->rx_rb.buffer;
-    size_t tail = atomic_load(&handle->rx_rb.tail);
     size_t msg_size = end < tail ? end + handle->rx_rb.max_size - tail + 1 : end - tail + 1;
 
     if (msg_size > handle->rx_wb_size) {
         // Message is too large for the work buffer, discard it and advance tail
         size_t next_tail = (end + 1) % handle->rx_rb.max_size;
         atomic_store(&handle->rx_rb.tail, next_tail);
+        handle->rx_search_from = atomic_load(&handle->rx_rb.tail); // Reset search_from to the new tail after successful read
         return BETA_COM_ERR_BUFFER_TOO_SMALL;
     }
     // Read the encoded message from the ring buffer
-    beta_com_err_t rb_read_err = read_linear_block(&(handle->rx_rb), handle->rx_work_buff, msg_size);
+    beta_com_err_t rb_read_err = read_linear_block(&handle->rx_rb, handle->rx_work_buff, msg_size);
     if (rb_read_err != 0) {
         return rb_read_err;
     }
+    handle->rx_search_from = atomic_load(&handle->rx_rb.tail); // Reset search_from to the new tail after successful read
 
     // Decode the message from the work buffer into the final output buffer
     int32_t decoded_len = cobs_decode(handle->rx_work_buff,  msg_size, buff, buff_size);
