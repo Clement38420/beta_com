@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdatomic.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,7 +25,8 @@ typedef enum {
     BETA_COM_ERR_RB_EMPTY = -7,              // Empty ring-buffer
     BETA_COM_ERR_NO_MESSAGE_FOUND = -8,      // No complete message found in the ring-buffer
     BETA_COM_ERR_RB_NOT_ENOUGH_SPACE = -9,   // Not enough space in the ring-buffer to push data
-    BETA_COM_ERR_OUT_OF_MEMORY = -10         // Dynamic memory allocation failed
+    BETA_COM_ERR_OUT_OF_MEMORY = -10,        // Dynamic memory allocation failed
+    BETA_COM_ERR_RB_NOT_ENOUGH_DATA = -11,   // Not enough data in the ring-buffer to read
 } beta_com_err_t;
 
 typedef struct {
@@ -33,8 +36,8 @@ typedef struct {
 
 typedef struct {
     uint8_t *buffer;
-    size_t head;
-    size_t tail;
+    atomic_size_t head;
+    atomic_size_t tail;
     size_t max_size;
 } ring_buffer_t;
 
@@ -69,10 +72,42 @@ beta_com_err_t rb_pop(ring_buffer_t *rb, uint8_t *data);
 /**
  * @brief Returns the number of bytes currently stored in the ring buffer.
  *
- * @param rb The ring buffer.
+ * @param rb Pointer to the ring buffer.
  * @return The number of bytes available to be read from the buffer.
  */
-size_t rb_available_size(ring_buffer_t rb);
+size_t rb_free_size(const ring_buffer_t *rb);
+
+/**
+ * @brief Returns the number of bytes currently used in the ring buffer.
+ *
+ * @param rb Pointer to the ring buffer.
+ * @return The number of bytes currently stored in the buffer.
+ */
+size_t rb_used_size(const ring_buffer_t *rb);
+
+/**
+ * @brief Reads a linear block of contiguous data from the ring buffer and write it into a given buffer.
+ *
+ * This function is useful for reading data that potentially wraps around the end of the buffer.
+ *
+ * @param rb Pointer to the ring buffer.
+ * @param buff Pointer to a buff that will receive the data.
+ * @param block_size Block size to read.
+ * @return BETA_COM_SUCCESS on success, or BETA_COM_ERR_INVALID_ARGS if rb or block_ptr is NULL.
+ */
+beta_com_err_t rb_read_linear_block(ring_buffer_t *rb, uint8_t *buff, size_t block_size);
+
+/**
+ * @brief Writes a linear block of contiguous data into the ring buffer from a given buffer.
+ *
+ * This function is useful for writing data that potentially wraps around the end of the buffer.
+ *
+ * @param rb Pointer to the ring buffer.
+ * @param buff Pointer to a buff that contains the data to write.
+ * @param block_size Block size to write.
+ * @return BETA_COM_SUCCESS on success, or BETA_COM_ERR_INVALID_ARGS if rb or buff is NULL.
+ */
+beta_com_err_t rb_write_linear_block(ring_buffer_t *rb, const uint8_t *buff, size_t block_size);
 
 /**
  * @brief Searches for the first occurrence of a specific byte in the ring buffer.
@@ -92,7 +127,7 @@ typedef struct {
     uint8_t *tx_work_buff;
     size_t tx_wb_size;
 
-    uint8_t is_dynamic;
+    bool is_dynamic;
 } beta_com_handle_t;
 
 typedef struct {
@@ -104,7 +139,7 @@ typedef struct {
     size_t tx_rb_size;
     uint8_t *tx_work_buff;
     size_t tx_work_buff_size;
-    uint8_t use_dynamic_alloc;
+    bool use_dynamic_alloc;
 } beta_com_config_t;
 
 /**

@@ -6,6 +6,7 @@ A lightweight C library designed for robust serial communication, providing high
 
 *   **High-Level Message Handling**: Simple `send_message` and `receive_message` functions to handle packetization, encoding, and decoding automatically.
 *   **Ring Buffers**: Integrated RX and TX ring buffers to manage asynchronous data streams efficiently.
+*   **ISR-Safe**: The ring buffer functions (`rb_push`, `rb_pop`) are implemented using atomic operations, making them safe to call from Interrupt Service Routines (ISRs) without risking data corruption.
 *   **COBS Encoding/Decoding**: Frames data using `0x00` as a delimiter, ensuring the payload itself contains no zero bytes. Ideal for packet delineation over serial streams.
 *   **CRC16 Integrity Check**: Implements CRC-16 according to the **Modbus** standard (reflected polynomial `0xA001`) to ensure data integrity.
 *   **Zero-Copy IOVECs**: `cobs_encode` uses I/O vectors (`beta_iovec_t`) to encode data from multiple non-contiguous memory blocks without prior copying.

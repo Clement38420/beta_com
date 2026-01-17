@@ -6,8 +6,8 @@
 beta_com_err_t beta_com_init(beta_com_handle_t *handle, const beta_com_config_t *config) {
     if (handle == NULL || config == NULL) return BETA_COM_ERR_INVALID_ARGS;
 
-    if (config->use_dynamic_alloc == 1) {
-        handle->is_dynamic = 1;
+    if (config->use_dynamic_alloc == true) {
+        handle->is_dynamic = true;
 
         int err_code = 0;
         handle->tx_work_buff = malloc(config->tx_work_buff_size);
@@ -30,41 +30,21 @@ beta_com_err_t beta_com_init(beta_com_handle_t *handle, const beta_com_config_t 
         handle->tx_wb_size = config->tx_work_buff_size;
         handle->rx_wb_size = config->rx_work_buff_size;
 
-        handle->tx_rb = (ring_buffer_t){
-            .buffer = handle->tx_rb.buffer,
-            .head = 0,
-            .tail = 0,
-            .max_size = config->tx_rb_size
-        };
-        handle->rx_rb = (ring_buffer_t){
-            .buffer = handle->rx_rb.buffer,
-            .head = 0,
-            .tail = 0,
-            .max_size = config->rx_rb_size
-        };
+        rb_init(&handle->rx_rb, handle->rx_rb.buffer, config->rx_rb_size);
+        rb_init(&handle->tx_rb, handle->tx_rb.buffer, config->tx_rb_size);
 
         return BETA_COM_SUCCESS;
     }
 
     if (config->rx_rb_storage == NULL) return BETA_COM_ERR_INVALID_ARGS;
-    handle->rx_rb = (ring_buffer_t){
-        .buffer = config->rx_rb_storage,
-        .head = 0,
-        .tail = 0,
-        .max_size = config->rx_rb_size
-    };
+    rb_init(&handle->rx_rb, config->rx_rb_storage, config->rx_rb_size);
 
     if (config->rx_work_buff == NULL) return BETA_COM_ERR_INVALID_ARGS;
     handle->rx_work_buff = config->rx_work_buff;
     handle->rx_wb_size = config->rx_work_buff_size;
 
     if (config->tx_rb_storage == NULL) return BETA_COM_ERR_INVALID_ARGS;
-    handle->tx_rb = (ring_buffer_t){
-        .buffer = config->tx_rb_storage,
-        .head = 0,
-        .tail = 0,
-        .max_size = config->tx_rb_size
-    };
+    rb_init(&handle->tx_rb, config->tx_rb_storage, config->tx_rb_size);
 
     if (config->tx_work_buff == NULL) return BETA_COM_ERR_INVALID_ARGS;
     handle->tx_work_buff = config->tx_work_buff;
@@ -191,7 +171,7 @@ uint16_t calculate_crc16(const uint8_t *data, size_t length) {
 
     uint16_t crc = 0xFFFF;
 
-    for (size_t i = 0; i<length; i++) {
+    for (size_t i = 0; i < length; i++) {
         crc ^= data[i];
 
         for (int j = 0; j < 8; j++) {
@@ -217,29 +197,90 @@ beta_com_err_t rb_init(ring_buffer_t *rb, uint8_t *storage_array, size_t size) {
 }
 
 beta_com_err_t rb_push(ring_buffer_t *rb, uint8_t data) {
-    size_t next_h = (rb->head + 1) % rb->max_size;
+    size_t t = atomic_load(&rb->tail);
+    size_t h = atomic_load(&rb->head);
 
-    if (next_h == rb->tail) return BETA_COM_ERR_RB_FULL;
+    size_t next_h = (h + 1) % rb->max_size;
 
-    rb->buffer[rb->head] = data;
-    rb->head = next_h;
+    if (next_h == t) return BETA_COM_ERR_RB_FULL;
+
+    rb->buffer[h] = data;
+    atomic_store(&rb->head, next_h);
     return BETA_COM_SUCCESS;
 }
 
 beta_com_err_t rb_pop(ring_buffer_t *rb, uint8_t *data) {
-    if (rb->tail == rb->head) return BETA_COM_ERR_RB_EMPTY;
+    size_t t = atomic_load(&rb->tail);
+    size_t h = atomic_load(&rb->head);
+
+    if (t == h) return BETA_COM_ERR_RB_EMPTY;
 
     *data = rb->buffer[rb->tail];
-    rb->tail = (rb->tail + 1) % rb->max_size;
+    atomic_store(&rb->tail, (t + 1) % rb->max_size);
     return BETA_COM_SUCCESS;
 }
 
-size_t rb_available_size(ring_buffer_t rb) {
-    return rb.tail <= rb.head ? rb.tail + rb.max_size - rb.head - 1 : rb.tail - rb.head - 1;
+size_t rb_free_size(const ring_buffer_t *rb) {
+    size_t t = atomic_load(&rb->tail);
+    size_t h = atomic_load(&rb->head);
+    return t > h ? t - h - 1 : t + rb->max_size - h - 1;
+}
+
+size_t rb_used_size(const ring_buffer_t *rb) {
+    size_t t = atomic_load(&rb->tail);
+    size_t h = atomic_load(&rb->head);
+    return h >= t ? h - t : h + rb->max_size - t;
+}
+
+beta_com_err_t read_linear_block(ring_buffer_t *rb, uint8_t *buff, size_t block_size) {
+    if (rb == NULL || buff == NULL) return BETA_COM_ERR_INVALID_ARGS;
+
+    size_t t = atomic_load(&rb->tail);
+
+    if (rb_used_size(rb) < block_size) {
+        return BETA_COM_ERR_RB_NOT_ENOUGH_DATA;
+    }
+
+    if (t + block_size <= rb->max_size) {
+        memcpy(buff, &(rb->buffer[t]), block_size);
+    } else {
+        size_t first_part_size = rb->max_size - t;
+        memcpy(buff, &(rb->buffer[t]), first_part_size);
+        memcpy(buff + first_part_size, &(rb->buffer[0]), block_size - first_part_size);
+    }
+
+    atomic_store(&rb->tail, (t + block_size) % rb->max_size);
+
+    return BETA_COM_SUCCESS;
+}
+
+beta_com_err_t write_linear_block(ring_buffer_t *rb, const uint8_t *buff, size_t block_size) {
+    if (rb == NULL || buff == NULL) return BETA_COM_ERR_INVALID_ARGS;
+
+    size_t h = atomic_load(&rb->head);
+
+    if (rb_free_size(rb) < block_size) {
+        return BETA_COM_ERR_RB_NOT_ENOUGH_SPACE;
+    }
+
+    if (h + block_size <= rb->max_size) {
+        memcpy(&(rb->buffer[h]), buff, block_size);
+    } else {
+        size_t first_part_size = rb->max_size - h;
+        memcpy(&(rb->buffer[h]), buff, first_part_size);
+        memcpy(&(rb->buffer[0]), buff + first_part_size, block_size - first_part_size);
+    }
+
+    atomic_store(&rb->head, (h + block_size) % rb->max_size);
+
+    return BETA_COM_SUCCESS;
 }
 
 uint8_t* rbchr(const ring_buffer_t *rb, uint8_t byte) {
-    for (size_t i = rb->tail; i != rb->head; ) {
+    size_t t = atomic_load(&rb->tail);
+    size_t h = atomic_load(&rb->head);
+
+    for (size_t i = t; i != h; ) {
         if (rb->buffer[i] == byte) return &(rb->buffer[i]);
         i = (i + 1) % rb->max_size;
     }
@@ -251,24 +292,18 @@ int32_t receive_message(beta_com_handle_t *handle, uint8_t *buff, size_t buff_si
     if (p_end == NULL) return BETA_COM_ERR_NO_MESSAGE_FOUND;
 
     size_t end = p_end - handle->rx_rb.buffer;
-    size_t msg_size = end < handle->rx_rb.tail ? end + handle->rx_rb.max_size - handle->rx_rb.tail : end - handle->rx_rb.tail;
-    if (msg_size > buff_size) {
-        handle->rx_rb.tail = (end + 1) % handle->rx_rb.max_size;
+    size_t tail = atomic_load(&handle->rx_rb.tail);
+    size_t msg_size = end < tail ? end + handle->rx_rb.max_size - tail + 1 : end - tail + 1;
+
+    if (msg_size > handle->rx_wb_size) {
+        size_t next_tail = (end + 1) % handle->rx_rb.max_size;
+        atomic_store(&handle->rx_rb.tail, next_tail);
         return BETA_COM_ERR_BUFFER_TOO_SMALL;
     }
-
-    uint8_t *p_wb = handle->rx_work_buff;
-    while (handle->rx_rb.tail != end) {
-        beta_com_err_t pop_err = rb_pop(&(handle->rx_rb), p_wb);
-        if (pop_err != BETA_COM_SUCCESS) return pop_err;
-
-        p_wb++;
-        if ((size_t)(p_wb - handle->rx_work_buff) > handle->rx_wb_size) {
-            return BETA_COM_ERR_BUFFER_TOO_SMALL;
-        }
+    beta_com_err_t rb_read_err = read_linear_block(&(handle->rx_rb), handle->rx_work_buff, msg_size);
+    if (rb_read_err != 0) {
+        return rb_read_err;
     }
-    uint8_t dummy;
-    rb_pop(&(handle->rx_rb), &dummy);
 
     int32_t decoded_len = cobs_decode(handle->rx_work_buff,  msg_size, buff, buff_size);
 
@@ -310,15 +345,11 @@ int32_t send_message(beta_com_handle_t *handle, const uint8_t *buff, size_t buff
     int32_t encoded_len = cobs_encode(buffers, 2, handle->tx_work_buff, handle->tx_wb_size);
     if (encoded_len < 0) return encoded_len;
 
-    if (rb_available_size(handle->tx_rb) < encoded_len) return BETA_COM_ERR_RB_NOT_ENOUGH_SPACE;
+    if (rb_free_size(&handle->tx_rb) < encoded_len) return BETA_COM_ERR_RB_NOT_ENOUGH_SPACE;
 
-    uint8_t *p_wb = handle->tx_work_buff;
-    uint8_t *p_wb_end = handle->tx_work_buff + encoded_len;
-    while (p_wb != p_wb_end) {
-        beta_com_err_t push_err = rb_push(&(handle->tx_rb), *p_wb);
-        if (push_err != BETA_COM_SUCCESS) return push_err;
-
-        p_wb++;
+    beta_com_err_t rb_write_err = write_linear_block(&handle->tx_rb, handle->tx_work_buff, encoded_len);
+    if (rb_write_err != 0) {
+        return rb_write_err;
     }
 
     return encoded_len;
