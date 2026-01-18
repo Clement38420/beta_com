@@ -245,7 +245,7 @@ size_t rb_used_size(const ring_buffer_t *rb) {
     return h >= t ? h - t : h + rb->max_size - t;
 }
 
-beta_com_err_t read_linear_block(ring_buffer_t *rb, uint8_t *buff, size_t block_size) {
+beta_com_err_t rb_read_linear_block(ring_buffer_t *rb, uint8_t *buff, size_t block_size) {
     if (rb == NULL || buff == NULL) return BETA_COM_ERR_INVALID_ARGS;
 
     size_t t = atomic_load(&rb->tail);
@@ -268,7 +268,7 @@ beta_com_err_t read_linear_block(ring_buffer_t *rb, uint8_t *buff, size_t block_
     return BETA_COM_SUCCESS;
 }
 
-beta_com_err_t write_linear_block(ring_buffer_t *rb, const uint8_t *buff, size_t block_size) {
+beta_com_err_t rb_write_linear_block(ring_buffer_t *rb, const uint8_t *buff, size_t block_size) {
     if (rb == NULL || buff == NULL) return BETA_COM_ERR_INVALID_ARGS;
 
     size_t h = atomic_load(&rb->head);
@@ -337,7 +337,7 @@ int32_t receive_message(beta_com_handle_t *handle, uint8_t *buff, size_t buff_si
         return BETA_COM_ERR_BUFFER_TOO_SMALL;
     }
     // Read the encoded message from the ring buffer
-    beta_com_err_t rb_read_err = read_linear_block(&handle->rx_rb, handle->rx_work_buff, msg_size);
+    beta_com_err_t rb_read_err = rb_read_linear_block(&handle->rx_rb, handle->rx_work_buff, msg_size);
     if (rb_read_err != 0) {
         return rb_read_err;
     }
@@ -385,7 +385,7 @@ int32_t send_message(beta_com_handle_t *handle, const uint8_t *buff, size_t buff
     if (rb_free_size(&handle->tx_rb) < encoded_len) return BETA_COM_ERR_RB_NOT_ENOUGH_SPACE;
 
     // Write the encoded message to the transmit ring buffer
-    beta_com_err_t rb_write_err = write_linear_block(&handle->tx_rb, handle->tx_work_buff, encoded_len);
+    beta_com_err_t rb_write_err = rb_write_linear_block(&handle->tx_rb, handle->tx_work_buff, encoded_len);
     if (rb_write_err != 0) {
         return rb_write_err;
     }
