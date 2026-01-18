@@ -124,6 +124,14 @@ beta_com_err_t rb_write_linear_block(ring_buffer_t *rb, const uint8_t *buff, siz
  */
 uint8_t* rbchr(const ring_buffer_t *rb, uint8_t byte);
 
+/**
+ * @brief Flushes the ring buffer, discarding all stored data.
+ *
+ * @param rb Pointer to the ring buffer.
+ * @return BETA_COM_SUCCESS on success, or BETA_COM_ERR_INVALID_ARGS if rb is NULL.
+ */
+beta_com_err_t rb_flush(ring_buffer_t *rb);
+
 typedef struct {
     ring_buffer_t rx_rb;
     uint8_t *rx_work_buff;

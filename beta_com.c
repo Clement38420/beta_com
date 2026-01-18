@@ -303,6 +303,13 @@ uint8_t* rbchr(const ring_buffer_t *rb, uint8_t byte) {
     return NULL;
 }
 
+beta_com_err_t rb_flush(ring_buffer_t *rb) {
+    if (rb == NULL) return BETA_COM_ERR_INVALID_ARGS;
+
+    atomic_store(&rb->tail, atomic_load(&rb->head));
+    return BETA_COM_SUCCESS;
+}
+
 int32_t receive_message(beta_com_handle_t *handle, uint8_t *buff, size_t buff_size) {
     size_t tail = atomic_load(&handle->rx_rb.tail);
     size_t head = atomic_load(&handle->rx_rb.head);
