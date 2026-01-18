@@ -3,8 +3,14 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <stdatomic.h>
 #include <stdbool.h>
+
+#ifdef __cplusplus
+#include <atomic>
+using atomic_size_t = std::atomic<size_t>;
+#else
+#include <stdatomic.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
