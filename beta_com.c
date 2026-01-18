@@ -331,7 +331,14 @@ int32_t receive_message(beta_com_handle_t *handle, uint8_t *buff, size_t buff_si
         i = (i + 1) % handle->rx_rb.max_size;
     }
     handle->rx_search_from = i; // Update search_from for next call
-    if (i == head) return BETA_COM_ERR_NO_MESSAGE_FOUND;
+    if (i == head) {
+        if (rb_free_size(&handle->rx_rb) == 0) {
+            // Buffer is full but no message delimiter found, flush to recover
+            rb_flush(&handle->rx_rb);
+            handle->rx_search_from = atomic_load(&handle->rx_rb.tail);
+        }
+        return BETA_COM_ERR_NO_MESSAGE_FOUND;
+    }
 
     // Calculate the full message size, accounting for buffer wrap-around
     size_t msg_size = end < tail ? end + handle->rx_rb.max_size - tail + 1 : end - tail + 1;
