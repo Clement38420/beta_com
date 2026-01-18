@@ -382,7 +382,7 @@ int32_t send_message(beta_com_handle_t *handle, const uint8_t *buff, size_t buff
     int32_t encoded_len = cobs_encode(buffers, 2, handle->tx_work_buff, handle->tx_wb_size);
     if (encoded_len < 0) return encoded_len;
 
-    if (rb_free_size(&handle->tx_rb) < encoded_len) return BETA_COM_ERR_RB_NOT_ENOUGH_SPACE;
+    if (rb_free_size(&handle->tx_rb) < (size_t) encoded_len) return BETA_COM_ERR_RB_NOT_ENOUGH_SPACE;
 
     // Write the encoded message to the transmit ring buffer
     beta_com_err_t rb_write_err = rb_write_linear_block(&handle->tx_rb, handle->tx_work_buff, encoded_len);
