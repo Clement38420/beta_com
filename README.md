@@ -134,6 +134,8 @@ Note: When using beta_com_init_easy or use_dynamic_alloc, you must call beta_com
 
 ### Sending a Message
 
+To send a message, you provide the payload and its length. The library handles encoding, CRC calculation, and placing the final framed data into the transmit ring buffer.
+
 ```c
 const uint8_t payload[] = {0x01, 0x02, 0x03};
 
@@ -144,23 +146,19 @@ if (bytes_sent < 0) {
     // Handle error (e.g., buffer full)
 }
 
-// Now, you can read `bytes_sent` from `handle.tx_rb` and send them over UART.
-// Example:
+// The encoded message is now in the TX ring buffer, ready for transmission.
+// You can now read from the TX buffer and send the data over your hardware (e.g., UART).
 uint8_t byte_to_transmit;
 while (rb_pop(&handle.tx_rb, &byte_to_transmit) == BETA_COM_SUCCESS) {
     // uart_send_byte(byte_to_transmit);
 }
 ```
 
-### 3. Receiving a Message
+### Receiving a Message
 
 Push incoming bytes from your hardware (e.g., UART) into the RX ring buffer. Then, call `receive_message` to process the stream.
 
 ```c
-// In your UART RX interrupt or polling loop:
-// uint8_t received_byte = uart_read_byte();
-// rb_push(&handle.rx_rb, received_byte);
-
 // In your main loop, try to decode a message
 uint8_t message_buffer[128];
 int32_t message_len = receive_message(&handle, message_buffer, sizeof(message_buffer));
@@ -172,6 +170,40 @@ if (message_len > 0) {
     // Not enough data yet to form a complete message.
 } else {
     // An error occurred (e.g., CRC mismatch, buffer too small).
+}
+```
+
+### Bulk Data Transfer
+
+For efficiency, you can read from and write to the ring buffers in contiguous blocks. This is useful for DMA-based transfers or when interacting with hardware FIFOs.
+
+#### `rb_write_linear_block`
+
+Writes a block of data to the transmit ring buffer. This is the recommended way to feed the TX buffer before sending data over hardware (e.g., UART).
+
+```c
+uint8_t data_to_send[] = {0xDE, 0xAD, 0xBE, 0xEF};
+
+// Check if there is enough space
+if (rb_free_size(&handle.tx_rb) >= sizeof(data_to_send)) {
+    rb_write_linear_block(&handle.tx_rb, data_to_send, sizeof(data_to_send));
+} else {
+    // Handle buffer full error
+}
+```
+
+#### `rb_read_linear_block`
+
+Reads a block of available data from the receive ring buffer. This is useful for processing incoming data in chunks.
+
+```c
+uint8_t read_buffer[64];
+size_t available_data = rb_used_size(&handle.rx_rb);
+size_t read_size = (available_data > sizeof(read_buffer)) ? sizeof(read_buffer) : available_data;
+
+if (read_size > 0) {
+    rb_read_linear_block(&handle.rx_rb, read_buffer, read_size);
+    // 'read_buffer' now contains 'read_size' bytes of data
 }
 ```
 
@@ -217,6 +249,40 @@ uint16_t crc = calculate_crc16(data, sizeof(data));
 // crc now holds the calculated checksum.
 ```
 
+### Ring Buffer Management
+
+The library exposes low-level, ISR-safe functions for managing ring buffers. These functions use atomic operations to ensure thread and interrupt safety.
+
+#### `rb_push`
+
+Pushes a single byte into the ring buffer. This is ideal for feeding the RX buffer from a UART RX interrupt.
+
+```c
+// Example: In a UART RX ISR
+void UART_RX_IRQHandler() {
+    uint8_t received_byte = UART->DR; // Read byte from hardware
+    rb_push(&handle.rx_rb, received_byte);
+}
+```
+
+#### `rb_pop`
+
+Pops a single byte from the ring buffer. This can be used to transmit data byte-by-byte.
+
+```c
+uint8_t byte_to_transmit;
+if (rb_pop(&handle.tx_rb, &byte_to_transmit) == BETA_COM_SUCCESS) {
+    // uart_send_byte(byte_to_transmit);
+}
+```
+
+#### Utility Functions
+
+*   `rb_used_size(rb)`: Returns the number of bytes currently stored in the buffer.
+*   `rb_free_size(rb)`: Returns the number of bytes of free space available.
+*   `rb_flush(rb)`: Clears the ring buffer, discarding all its content.
+*   `rbchr(rb, byte)`: Searches for the first occurrence of a `byte` in the buffer.
+
 ## Error Codes
 
 Functions returning an `int32_t` or `beta_com_err_t` will provide a status code. `BETA_COM_SUCCESS` (0) or a positive value (indicating length) means success.
@@ -233,4 +299,5 @@ Functions returning an `int32_t` or `beta_com_err_t` will provide a status code.
 | `BETA_COM_ERR_RB_EMPTY`         | -7    | The ring buffer is empty.                                                |
 | `BETA_COM_ERR_NO_MESSAGE_FOUND` | -8    | No complete message (ending in 0x00) was found in the ring buffer.       |
 | `BETA_COM_ERR_RB_NOT_ENOUGH_SPACE` | -9 | Not enough space in the ring buffer to push the entire message.          |
-
+| `BETA_COM_ERR_OUT_OF_MEMORY`    | -10   | Dynamic memory allocation failed.                                        |
+| `BETA_COM_ERR_RB_NOT_ENOUGH_DATA` | -11   | Not enough data in the ring-buffer to read.                              |
