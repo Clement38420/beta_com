@@ -6,9 +6,9 @@ project(beta_com C)
 
 option(BUILD_TESTS "Build unit tests" OFF)
 
-add_library(beta_com beta_com.c)
+add_library(beta_com STATIC src/beta_com.c)
 
-target_include_directories(beta_com PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(beta_com PUBLIC include)
 
 if(BUILD_TESTS)
     add_executable(unit_tests

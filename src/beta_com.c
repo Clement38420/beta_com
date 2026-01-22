@@ -1,4 +1,4 @@
-#include "beta_com.h"
+#include "../include/beta_com.h"
 
 #include <stdlib.h>
 #include <string.h>
